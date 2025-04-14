@@ -14,130 +14,136 @@ class GoogleMapPage extends StatefulWidget {
 }
 
 class _GoogleMapPageState extends State<GoogleMapPage> {
-  final locationController = Location();
+  final _locationController = Location();
 
-  static const googlePlex = LatLng(37.4223, -122.0848);
-  static const mountainView = LatLng(37.3861, -122.0839);
+  final Completer<GoogleMapController> _mapController = 
+    Completer<GoogleMapController>();
 
-  LatLng? currentPosition = LatLng(37.42796133580664, -122.085749655962);
+  static const _pGooglePlex = LatLng(37.4223, -122.0848);
+  static const _pApplePark = LatLng(37.3346, -122.0090);
+
+  LatLng? _currentP = null;
+
+
   Map<PolylineId, Polyline> polylines = {};
 
    static const CameraPosition _kGooglePlex = CameraPosition(
-    target: LatLng(37.42796133580664, -122.085749655962),
-    zoom: 14.4746,
+    target: _pGooglePlex,
+    zoom: 13,
   );
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance
-      .addPostFrameCallback((_) async => await initializeMap());
-  }
-
-  Future<void> initializeMap() async {
-    await fetchLocationUpdates();
-    final coordinates = await fetchPolylinePoints();
-    print(coordinates);
-    generatePolyLineFromPoints(coordinates);
+    getLocationUpdates().then(
+      (_) => {
+        getPolylinePoints().then((coordinates) => {
+          generatePolyLineFromPoints(coordinates),
+        }),
+      },
+    );
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    body: currentPosition == null 
-    ? const Center(child: CircularProgressIndicator())
-    : GoogleMap(
-      initialCameraPosition: _kGooglePlex,
-      markers: {
-        Marker(
-          markerId: MarkerId('currentLocation'),
-          icon: BitmapDescriptor.defaultMarker,
-          position: currentPosition!,
-        ),
-        Marker(
-          markerId: MarkerId('sourceLocation'),
-          icon: BitmapDescriptor.defaultMarker,
-          position: googlePlex,
-        ),
-        Marker(
-          markerId: MarkerId('destionationLocation'),
-          icon: BitmapDescriptor.defaultMarker,
-          position: mountainView,
-        ),
-      },
-      polylines: Set<Polyline>.of(polylines.values),
+    body: _currentP == null 
+      ? const Center(child: CircularProgressIndicator())
+      : GoogleMap(
+        onMapCreated: (GoogleMapController controller) {
+          _mapController.complete(controller);
+        },
+        initialCameraPosition: _kGooglePlex,
+        markers: {
+          Marker(
+            markerId: MarkerId('_currentLocation'),
+            icon: BitmapDescriptor.defaultMarker,
+            position: _currentP!,
+          ),
+          Marker(
+            markerId: MarkerId('_sourceLocation'),
+            icon: BitmapDescriptor.defaultMarker,
+            position: _pGooglePlex,
+          ),
+          Marker(
+            markerId: MarkerId('_destionationLocation'),
+            icon: BitmapDescriptor.defaultMarker,
+            position: _pApplePark,
+          ),
+        },
+        polylines: Set<Polyline>.of(polylines.values),
     ),
   );
 
-  Future<void> fetchLocationUpdates() async {
+  Future<void> _cameraToPosition(LatLng pos) async {
+    final GoogleMapController controller = await _mapController.future;
+    CameraPosition _newCameraUpdate = CameraPosition(
+      target: pos, 
+      zoom: 13
+    );
+    await controller.animateCamera(
+      CameraUpdate.newCameraPosition(_newCameraUpdate),
+    );
+  }
+
+  Future<void> getLocationUpdates() async {
     bool _serviceEnabled;
     PermissionStatus _permissionGranted;
 
-    _serviceEnabled = await locationController.serviceEnabled();
-    if (!_serviceEnabled) {
-      _serviceEnabled = await locationController.requestService();
-      if (!_serviceEnabled) {
-        return;
-      }
+    _serviceEnabled = await _locationController.serviceEnabled();
+    if (_serviceEnabled) {
+      _serviceEnabled = await _locationController.requestService();
     } else {
       return;
     }
 
-    _permissionGranted = await locationController.hasPermission();
+    _permissionGranted = await _locationController.hasPermission();
     if (_permissionGranted == PermissionStatus.denied) {
-      _permissionGranted = await locationController.requestPermission();
+      _permissionGranted = await _locationController.requestPermission();
       if (_permissionGranted != PermissionStatus.granted) {
         return;
       }
     }
-
-    locationController.onLocationChanged.listen((currentLocation) {
+  
+    _locationController.onLocationChanged.listen((LocationData currentLocation) {
       if (currentLocation.latitude != null &&
        currentLocation.longitude != null) {
         setState(() {
-          currentPosition = LatLng(
+          _currentP = LatLng(
             currentLocation.latitude!,
             currentLocation.longitude!
           );
+          _cameraToPosition(_currentP!);
         });
-        print(currentPosition);
        }
     });
   }
 
-  Future<List<LatLng>> fetchPolylinePoints() async {
-    final polylinePoints = PolylinePoints();
-    
-    final result = await polylinePoints.getRouteBetweenCoordinates(
-      googleApiKey: googleMapsApiKey,
-      request: PolylineRequest(
-        origin: PointLatLng(googlePlex.latitude, googlePlex.longitude),
-        destination: PointLatLng(mountainView.latitude, mountainView.longitude),
-        mode: TravelMode.driving,
-        wayPoints: [PolylineWayPoint(location: "Sabo, Yaba Lagos Nigeria")],
-      )
+  Future<List<LatLng>> getPolylinePoints() async {
+    List<LatLng> polylineCoordinates = [];
+    PolylinePoints polylinePoints = PolylinePoints();
+    PolylineResult result = await polylinePoints.getRouteBetweenCoordinates(
+      GOOGLE_MAPS_API_KEY,
+      PointLatLng(_pGooglePlex.latitude, _pGooglePlex.longitude),
+      PointLatLng(_pApplePark.latitude, _pApplePark.longitude),
+      travelMode: TravelMode.driving,
     );
-    print(result);
     if (result.points.isNotEmpty) {
-      return result.points
-          .map((point) => LatLng(point.latitude, point.longitude))
-          .toList();
+      result.points.forEach((PointLatLng point) {
+        polylineCoordinates.add(LatLng(point.latitude, point.longitude));
+      });
     } else {
-      debugPrint(result.errorMessage);
-      return [];
+      print(result.errorMessage);
     }
+    return polylineCoordinates;
   }
 
-  Future<void> generatePolyLineFromPoints(
-      List<LatLng> polylineCoordinates) async {
-    const id = PolylineId('polyline');
-
-    final polyline = Polyline(
-      polylineId: id,
-      color: Colors.blueAccent,
+  void generatePolyLineFromPoints(List<LatLng> polylineCoordinates) async {
+    PolylineId id = PolylineId('poly');
+    Polyline polyline = Polyline(
+      polylineId: id, 
+      color: Colors.black,
       points: polylineCoordinates,
-      width: 5,
-    );
-
+      width: 8);
     setState(() => polylines[id] = polyline);
   }
 }
